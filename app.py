@@ -74,7 +74,7 @@ def find_robust_optimal(target_ret_pct, target_mdd_pct, max_assets, data):
 
 # --- UI 레이아웃 ---
 if st.session_state.page == 'survey':
-    st.title("👨‍🍳 나만의 ETF 투자 레시피 설계") # 직관적인 문구로 변경
+    st.title("👨‍🍳 나만의 ETF 투자 설계") # 직관적인 문구로 변경
     st.write("원하는 수익률과 감내할 수 있는 위험을 입력해 주세요.")
     
     col1, col2 = st.columns(2)
