@@ -7,11 +7,13 @@ from scipy.optimize import minimize
 import warnings
 
 warnings.filterwarnings('ignore')
-st.set_page_config(page_title="Target Precision Quant", layout="wide")
+st.set_page_config(page_title="Precision Quant Portfolio", layout="wide")
 
 if 'page' not in st.session_state: st.session_state.page = 'survey'
 if 'target_return' not in st.session_state: st.session_state.target_return = 15.0
 if 'target_mdd' not in st.session_state: st.session_state.target_mdd = 12.0
+# 🌟 오차범위 설정 (±1.0%)
+TOLERANCE = 1.0 
 
 # --- [ETF 유니버스 정보] ---
 ETF_INFO = {
@@ -36,7 +38,8 @@ def get_data(tickers):
 def find_robust_optimal(target_ret_pct, target_mdd_pct, data):
     rets = data[universe].pct_change().dropna()
     target_ret, target_mdd = target_ret_pct / 100.0, target_mdd_pct / 100.0
-    yrs, tol = len(rets) / 252, 0.01
+    yrs = len(rets) / 252
+    tol_val = TOLERANCE / 100.0
 
     def mdd_fn(w):
         cum_rets = (1 + (rets @ w)).cumprod()
@@ -44,10 +47,11 @@ def find_robust_optimal(target_ret_pct, target_mdd_pct, data):
 
     def ret_cons(w):
         cagr = ((1 + (rets @ w)).cumprod().iloc[-1] ** (1/yrs)) - 1
-        return 0.01 - abs(cagr - target_ret)
+        return tol_val - abs(cagr - target_ret)
 
     def mdd_limit_cons(w):
-        return target_mdd - mdd_fn(w)
+        curr_mdd = mdd_fn(w)
+        return tol_val - abs(curr_mdd - target_mdd)
 
     cons_full = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
                  {'type': 'ineq', 'fun': ret_cons},
@@ -77,15 +81,23 @@ if st.session_state.page == 'survey':
 
 elif st.session_state.page == 'dashboard':
     st.title("🛡️ 포트폴리오 분석 결과")
+    
+    # 🌟 상단에 적용된 오차범위 명시
+    st.markdown(f"""
+    <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border-left: 5px solid #1e293b; margin-bottom: 20px;">
+        <span style="font-size: 0.9rem; color: #64748b;">🎯 설정된 투자 목표 (적용 오차범위: ±{TOLERANCE}%)</span><br>
+        <b style="font-size: 1.2rem;">연 수익률: {st.session_state.target_return}% | 목표 MDD: -{st.session_state.target_mdd}%</b>
+    </div>
+    """, unsafe_allow_html=True)
+
     data = get_data(universe)
     wts, is_fallback = find_robust_optimal(st.session_state.target_return, st.session_state.target_mdd, data)
 
     if wts:
-        # 🌟 [개선] 성공/차선책 메시지에 목표 수치 포함
         if is_fallback:
-            st.warning(f"⚠️ **차선책 추천:** 입력하신 MDD(-{st.session_state.target_mdd}%) 내에서는 연 수익률 {st.session_state.target_return}% 달성이 불가능합니다. 수익률 목표를 우선하여 '최저 MDD' 조합을 찾아내었습니다.")
+            st.warning(f"⚠️ **차선책 추천:** 입력하신 MDD 범위(±{TOLERANCE}%) 내에서는 해를 찾을 수 없습니다. 수익률 목표({st.session_state.target_return}%)를 우선하여 최저 MDD 조합을 제안합니다.")
         else:
-            st.success(f"✅ **최적화 성공!** 설정하신 목표 수익률 **연 {st.session_state.target_return}%**와 **MDD -{st.session_state.target_mdd}%** 조건을 모두 만족하는 최상의 조합을 찾았습니다.")
+            st.success(f"✅ **최적화 성공!** 모든 조건이 설정 범위(±{TOLERANCE}%) 내에서 완벽하게 충족되었습니다.")
 
         if st.button("⬅️ 설정 수정"): st.session_state.page = 'survey'; st.rerun()
 
@@ -110,8 +122,8 @@ elif st.session_state.page == 'dashboard':
         with col2:
             norm = (data / data.iloc[0]) * 100
             pv = sum([norm[t] * (w/100) for t, w in wts.items()])
-            df_plot = pd.DataFrame({"추천 포트폴리오": pv, "S&P 500 (SPY)": norm['SPY'], "나스닥 100 (QQQ)": norm['QQQ']})
-            st.plotly_chart(px.line(df_plot, title="과거 10년 성과 비교"), use_container_width=True)
+            df_plot = pd.DataFrame({"추천 포트폴리오": pv, "S&P 500": norm['SPY'], "나스닥 100": norm['QQQ']})
+            st.plotly_chart(px.line(df_plot, title="과거 10년 성과 시뮬레이션"), use_container_width=True)
             
             res_list = []
             for c in df_plot.columns:
