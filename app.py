@@ -7,7 +7,7 @@ from scipy.optimize import minimize
 import warnings
 
 warnings.filterwarnings('ignore')
-st.set_page_config(page_title="Fallback Quant Advisor", layout="wide")
+st.set_page_config(page_title="Target Precision Quant", layout="wide")
 
 if 'page' not in st.session_state: st.session_state.page = 'survey'
 if 'target_return' not in st.session_state: st.session_state.target_return = 15.0
@@ -38,17 +38,14 @@ def find_robust_optimal(target_ret_pct, target_mdd_pct, data):
     target_ret, target_mdd = target_ret_pct / 100.0, target_mdd_pct / 100.0
     yrs, tol = len(rets) / 252, 0.01
 
-    # 1. MDD를 목적 함수로 설정 (최소화 대상)
     def mdd_fn(w):
         cum_rets = (1 + (rets @ w)).cumprod()
         return -((cum_rets - cum_rets.cummax()) / cum_rets.cummax()).min()
 
-    # 제약조건: 수익률은 타겟 근처(±1%)여야 함
     def ret_cons(w):
         cagr = ((1 + (rets @ w)).cumprod().iloc[-1] ** (1/yrs)) - 1
         return 0.01 - abs(cagr - target_ret)
 
-    # 🌟 시도 1: 수익률 & MDD 조건을 모두 만족하는지 확인
     def mdd_limit_cons(w):
         return target_mdd - mdd_fn(w)
 
@@ -58,7 +55,6 @@ def find_robust_optimal(target_ret_pct, target_mdd_pct, data):
     
     res = minimize(mdd_fn, [1./len(universe)]*len(universe), bounds=[(0, 0.4)]*len(universe), constraints=cons_full, method='SLSQP')
 
-    # 🌟 시도 2 (Fallback): MDD 조건을 못 맞추면, 수익률만 맞춘 채 MDD를 '최소화'함
     is_fallback = False
     if not res.success:
         is_fallback = True
@@ -67,17 +63,17 @@ def find_robust_optimal(target_ret_pct, target_mdd_pct, data):
         res = minimize(mdd_fn, [1./len(universe)]*len(universe), bounds=[(0, 0.4)]*len(universe), constraints=cons_fallback, method='SLSQP')
 
     if not res.success: return None, False
-    
     weights = {t: round(res.x[i]*100, 1) for i, t in enumerate(universe) if res.x[i] > 0.01}
     return weights, is_fallback
 
 # --- UI ---
 if st.session_state.page == 'survey':
-    st.title("🏛️ 스마트 차선책 퀀트 엔진")
+    st.title("🏛️ 정밀 타겟 퀀트 엔진")
     col1, col2 = st.columns(2)
-    st.session_state.target_return = col1.number_input("목표 수익률 (%)", 1.0, 30.0, 15.0)
-    st.session_state.target_mdd = col2.number_input("목표 MDD (%)", 1.0, 50.0, 12.0)
-    if st.button("분석 시작 🚀", use_container_width=True): st.session_state.page = 'dashboard'; st.rerun()
+    st.session_state.target_return = col1.number_input("목표 수익률 (%)", 1.0, 30.0, float(st.session_state.target_return), 0.1)
+    st.session_state.target_mdd = col2.number_input("목표 MDD (%)", 1.0, 50.0, float(st.session_state.target_mdd), 0.1)
+    if st.button("분석 시작 🚀", use_container_width=True, type="primary"): 
+        st.session_state.page = 'dashboard'; st.rerun()
 
 elif st.session_state.page == 'dashboard':
     st.title("🛡️ 포트폴리오 분석 결과")
@@ -85,30 +81,42 @@ elif st.session_state.page == 'dashboard':
     wts, is_fallback = find_robust_optimal(st.session_state.target_return, st.session_state.target_mdd, data)
 
     if wts:
+        # 🌟 [개선] 성공/차선책 메시지에 목표 수치 포함
         if is_fallback:
-            st.warning(f"⚠️ 알림: 입력하신 MDD(-{st.session_state.target_mdd}%) 내에서는 목표 수익률 달성이 불가능합니다. 수익률 {st.session_state.target_return}%를 유지하면서 '가장 안전한(최저 MDD)' 조합을 찾아내었습니다.")
+            st.warning(f"⚠️ **차선책 추천:** 입력하신 MDD(-{st.session_state.target_mdd}%) 내에서는 연 수익률 {st.session_state.target_return}% 달성이 불가능합니다. 수익률 목표를 우선하여 '최저 MDD' 조합을 찾아내었습니다.")
         else:
-            st.success(f"✅ 축하합니다! 목표 수익률과 MDD 조건을 모두 만족하는 최적의 조합을 찾았습니다.")
+            st.success(f"✅ **최적화 성공!** 설정하신 목표 수익률 **연 {st.session_state.target_return}%**와 **MDD -{st.session_state.target_mdd}%** 조건을 모두 만족하는 최상의 조합을 찾았습니다.")
+
+        if st.button("⬅️ 설정 수정"): st.session_state.page = 'survey'; st.rerun()
 
         col1, col2 = st.columns([1, 2.5])
         with col1:
             st.subheader("💡 추천 비중")
-            for t, w in sorted(wts.items(), key=lambda x: x[1], reverse=True):
-                sec, desc = get_etf_details(t)
-                st.markdown(f"""<div style="padding: 6px; border-bottom: 1px solid #eee;">
-                    <b>{t}</b> <span style="color:green;">{w}%</span><br>
-                    <small>{sec} · {desc}</small></div>""", unsafe_allow_html=True)
+            sorted_wts = sorted(wts.items(), key=lambda x: x[1], reverse=True)
+            for t, w in sorted_wts:
+                sector, comment = get_etf_details(t)
+                st.markdown(f"""
+                <div style="padding: 6px 10px; background-color: white; border: 1px solid #e2e8f0; border-radius: 4px; margin-bottom: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                        <span style="font-size: 1rem; font-weight: 700; color: #0f172a;">{t}</span>
+                        <span style="font-size: 1rem; font-weight: 700; color: #16a34a;">{w}%</span>
+                    </div>
+                    <div style="font-size: 0.75rem; color: #64748b; line-height: 1.2; margin-top: 2px;">
+                        <b>{sector}</b> · {comment}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        
         with col2:
             norm = (data / data.iloc[0]) * 100
             pv = sum([norm[t] * (w/100) for t, w in wts.items()])
-            df_plot = pd.DataFrame({"Portfolio": pv, "SPY": norm['SPY'], "QQQ": norm['QQQ']})
-            st.plotly_chart(px.line(df_plot, title="성과 시뮬레이션"), use_container_width=True)
+            df_plot = pd.DataFrame({"추천 포트폴리오": pv, "S&P 500 (SPY)": norm['SPY'], "나스닥 100 (QQQ)": norm['QQQ']})
+            st.plotly_chart(px.line(df_plot, title="과거 10년 성과 비교"), use_container_width=True)
             
             res_list = []
             for c in df_plot.columns:
                 yrs = len(df_plot[c])/252
                 cagr, mdd = ((df_plot[c].iloc[-1]/df_plot[c].iloc[0])**(1/yrs)-1)*100, ((df_plot[c]-df_plot[c].cummax())/df_plot[c].cummax()).min()*100
-                res_list.append({"구분": c, "CAGR": f"{cagr:.2f}%", "MDD": f"{mdd:.2f}%"})
+                res_list.append({"자산 구분": c, "CAGR(수익률)": f"{cagr:.2f}%", "MDD(최대낙폭)": f"{mdd:.2f}%"})
+            st.subheader("📊 지수 대비 성과 요약")
             st.table(pd.DataFrame(res_list))
-    else:
-        st.error("데이터 부족으로 결과를 낼 수 없습니다.")
