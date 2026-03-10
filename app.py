@@ -89,7 +89,7 @@ if st.session_state.page == 'survey':
         st.session_state.page = 'dashboard'; st.rerun()
 
 elif st.session_state.page == 'dashboard':
-    st.title("🛡️ 맞춤형 자산배분 처방전")
+    st.title("🛡️ 맞춤형 자산배분 ")
     st.markdown(f"""
     <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border-left: 5px solid #1e293b; margin-bottom: 20px;">
         <span style="font-size: 0.9rem; color: #64748b;">💰 총 투자액: <b>${st.session_state.total_investment:,.0f}</b> | 적용 오차범위: ±{TOLERANCE}%</span><br>
