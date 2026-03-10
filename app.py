@@ -7,12 +7,12 @@ from scipy.optimize import minimize
 import warnings
 
 warnings.filterwarnings('ignore')
-st.set_page_config(page_title="Precision Quant Portfolio", layout="wide")
+st.set_page_config(page_title="Concentrated Quant Advisor", layout="wide")
 
 if 'page' not in st.session_state: st.session_state.page = 'survey'
-if 'target_return' not in st.session_state: st.session_state.target_return = 15.0
-if 'target_mdd' not in st.session_state: st.session_state.target_mdd = 12.0
-# 🌟 오차범위 설정 (±1.0%)
+if 'target_return' not in st.session_state: st.session_state.target_return = 12.0
+if 'target_mdd' not in st.session_state: st.session_state.target_mdd = 15.0
+if 'max_assets' not in st.session_state: st.session_state.max_assets = 5
 TOLERANCE = 1.0 
 
 # --- [ETF 유니버스 정보] ---
@@ -35,69 +35,70 @@ def get_data(tickers):
     if data.index.tz is not None: data.index = data.index.tz_localize(None)
     return data
 
-def find_robust_optimal(target_ret_pct, target_mdd_pct, data):
+def find_robust_optimal(target_ret_pct, target_mdd_pct, max_assets, data):
     rets = data[universe].pct_change().dropna()
     target_ret, target_mdd = target_ret_pct / 100.0, target_mdd_pct / 100.0
-    yrs = len(rets) / 252
-    tol_val = TOLERANCE / 100.0
+    yrs, tol_val = len(rets) / 252, TOLERANCE / 100.0
 
-    def mdd_fn(w):
-        cum_rets = (1 + (rets @ w)).cumprod()
+    def mdd_fn(w, r):
+        cum_rets = (1 + (r @ w)).cumprod()
         return -((cum_rets - cum_rets.cummax()) / cum_rets.cummax()).min()
 
-    def ret_cons(w):
-        cagr = ((1 + (rets @ w)).cumprod().iloc[-1] ** (1/yrs)) - 1
+    def ret_cons(w, r):
+        cagr = ((1 + (r @ w)).cumprod().iloc[-1] ** (1/yrs)) - 1
         return tol_val - abs(cagr - target_ret)
 
-    def mdd_limit_cons(w):
-        curr_mdd = mdd_fn(w)
-        return tol_val - abs(curr_mdd - target_mdd)
-
-    cons_full = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
-                 {'type': 'ineq', 'fun': ret_cons},
-                 {'type': 'ineq', 'fun': mdd_limit_cons}]
-    
-    res = minimize(mdd_fn, [1./len(universe)]*len(universe), bounds=[(0, 0.4)]*len(universe), constraints=cons_full, method='SLSQP')
-
-    is_fallback = False
-    if not res.success:
-        is_fallback = True
-        cons_fallback = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
-                         {'type': 'ineq', 'fun': ret_cons}]
-        res = minimize(mdd_fn, [1./len(universe)]*len(universe), bounds=[(0, 0.4)]*len(universe), constraints=cons_fallback, method='SLSQP')
+    # 🌟 1단계: 전체 유니버스에서 최적화 시도
+    res = minimize(mdd_fn, [1./len(universe)]*len(universe), args=(rets,), 
+                   bounds=[(0, 0.5)]*len(universe), 
+                   constraints=[{'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
+                                {'type': 'ineq', 'fun': ret_cons, 'args': (rets,)}], method='SLSQP')
 
     if not res.success: return None, False
-    weights = {t: round(res.x[i]*100, 1) for i, t in enumerate(universe) if res.x[i] > 0.01}
+
+    # 🌟 2단계: 종목 수 제한 (상위 N개 추출 후 재최적화)
+    top_idx = np.argsort(res.x)[-int(max_assets):]
+    top_tickers = [universe[i] for i in top_idx]
+    rets_sub = rets[top_tickers]
+    
+    res_sub = minimize(mdd_fn, [1./len(top_tickers)]*len(top_tickers), args=(rets_sub,),
+                       bounds=[(0.05, 0.6)]*len(top_tickers), # 최소 5% 이상 담도록 설정
+                       constraints=[{'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
+                                    {'type': 'ineq', 'fun': ret_cons, 'args': (rets_sub,)}], method='SLSQP')
+
+    is_fallback = not res_sub.success
+    final_res = res_sub if res_sub.success else res # 실패 시 전체 비중 반환
+    final_tickers = top_tickers if res_sub.success else universe
+    
+    weights = {final_tickers[i]: round(final_res.x[i]*100, 1) for i in range(len(final_tickers)) if final_res.x[i] > 0.01}
     return weights, is_fallback
 
 # --- UI ---
 if st.session_state.page == 'survey':
-    st.title("🏛️ 정밀 타겟 퀀트 엔진")
-    col1, col2 = st.columns(2)
+    st.title("🏛️ 압축형 정밀 퀀트 엔진")
+    col1, col2, col3 = st.columns(3)
     st.session_state.target_return = col1.number_input("목표 수익률 (%)", 1.0, 30.0, float(st.session_state.target_return), 0.1)
     st.session_state.target_mdd = col2.number_input("목표 MDD (%)", 1.0, 50.0, float(st.session_state.target_mdd), 0.1)
-    if st.button("분석 시작 🚀", use_container_width=True, type="primary"): 
+    st.session_state.max_assets = col3.number_input("최대 종목 수 (개)", 3, 15, int(st.session_state.max_assets))
+    
+    if st.button("핵심 포트폴리오 생성 🚀", use_container_width=True, type="primary"): 
         st.session_state.page = 'dashboard'; st.rerun()
 
 elif st.session_state.page == 'dashboard':
     st.title("🛡️ 포트폴리오 분석 결과")
-    
-    # 🌟 상단에 적용된 오차범위 명시
     st.markdown(f"""
-    <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; border-left: 5px solid #1e293b; margin-bottom: 20px;">
-        <span style="font-size: 0.9rem; color: #64748b;">🎯 설정된 투자 목표 (적용 오차범위: ±{TOLERANCE}%)</span><br>
-        <b style="font-size: 1.2rem;">연 수익률: {st.session_state.target_return}% | 목표 MDD: -{st.session_state.target_mdd}%</b>
+    <div style="background-color: #f8fafc; padding: 12px; border-radius: 8px; border-left: 5px solid #1e293b; margin-bottom: 20px;">
+        <span style="font-size: 0.9rem; color: #64748b;">🎯 타겟 설정: {st.session_state.max_assets}개 종목 이내 (오차 ±{TOLERANCE}%)</span><br>
+        <b style="font-size: 1.1rem;">수익률 {st.session_state.target_return}% | 목표 MDD -{st.session_state.target_mdd}%</b>
     </div>
     """, unsafe_allow_html=True)
 
     data = get_data(universe)
-    wts, is_fallback = find_robust_optimal(st.session_state.target_return, st.session_state.target_mdd, data)
+    wts, is_fallback = find_robust_optimal(st.session_state.target_return, st.session_state.target_mdd, st.session_state.max_assets, data)
 
     if wts:
-        if is_fallback:
-            st.warning(f"⚠️ **차선책 추천:** 입력하신 MDD 범위(±{TOLERANCE}%) 내에서는 해를 찾을 수 없습니다. 수익률 목표({st.session_state.target_return}%)를 우선하여 최저 MDD 조합을 제안합니다.")
-        else:
-            st.success(f"✅ **최적화 성공!** 모든 조건이 설정 범위(±{TOLERANCE}%) 내에서 완벽하게 충족되었습니다.")
+        if is_fallback: st.warning("⚠️ 입력하신 종목 수 제한 내에서는 해를 찾기 어려워 전체 유니버스 비중을 보여드립니다.")
+        else: st.success(f"✅ 핵심 {len(wts)}개 종목으로 구성된 최적의 조합을 찾았습니다.")
 
         if st.button("⬅️ 설정 수정"): st.session_state.page = 'survey'; st.rerun()
 
@@ -107,17 +108,13 @@ elif st.session_state.page == 'dashboard':
             sorted_wts = sorted(wts.items(), key=lambda x: x[1], reverse=True)
             for t, w in sorted_wts:
                 sector, comment = get_etf_details(t)
-                st.markdown(f"""
-                <div style="padding: 6px 10px; background-color: white; border: 1px solid #e2e8f0; border-radius: 4px; margin-bottom: 4px;">
+                st.markdown(f"""<div style="padding: 6px 10px; background-color: white; border: 1px solid #e2e8f0; border-radius: 4px; margin-bottom: 4px;">
                     <div style="display: flex; justify-content: space-between; align-items: baseline;">
                         <span style="font-size: 1rem; font-weight: 700; color: #0f172a;">{t}</span>
                         <span style="font-size: 1rem; font-weight: 700; color: #16a34a;">{w}%</span>
                     </div>
-                    <div style="font-size: 0.75rem; color: #64748b; line-height: 1.2; margin-top: 2px;">
-                        <b>{sector}</b> · {comment}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                    <div style="font-size: 0.75rem; color: #64748b; line-height: 1.2; margin-top: 2px;"><b>{sector}</b> · {comment}</div>
+                </div>""", unsafe_allow_html=True)
         
         with col2:
             norm = (data / data.iloc[0]) * 100
@@ -129,6 +126,5 @@ elif st.session_state.page == 'dashboard':
             for c in df_plot.columns:
                 yrs = len(df_plot[c])/252
                 cagr, mdd = ((df_plot[c].iloc[-1]/df_plot[c].iloc[0])**(1/yrs)-1)*100, ((df_plot[c]-df_plot[c].cummax())/df_plot[c].cummax()).min()*100
-                res_list.append({"자산 구분": c, "CAGR(수익률)": f"{cagr:.2f}%", "MDD(최대낙폭)": f"{mdd:.2f}%"})
-            st.subheader("📊 지수 대비 성과 요약")
+                res_list.append({"자산 구분": c, "CAGR": f"{cagr:.2f}%", "MDD": f"{mdd:.2f}%"})
             st.table(pd.DataFrame(res_list))
