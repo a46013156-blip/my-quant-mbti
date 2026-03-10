@@ -7,8 +7,9 @@ from scipy.optimize import minimize
 import warnings
 
 warnings.filterwarnings('ignore')
-st.set_page_config(page_title="Precision Quant Portfolio", layout="wide")
+st.set_page_config(page_title="Compact Quant Portfolio", layout="wide")
 
+# 세션 상태 관리
 if 'page' not in st.session_state: st.session_state.page = 'survey'
 if 'target_return' not in st.session_state: st.session_state.target_return = 15.0
 if 'target_mdd' not in st.session_state: st.session_state.target_mdd = 12.0
@@ -36,20 +37,13 @@ def get_data(tickers):
 
 def find_precise_optimal(target_ret_pct, target_mdd_pct, data):
     rets = data[universe].pct_change().dropna()
-    target_ret = target_ret_pct / 100.0
-    target_mdd = target_mdd_pct / 100.0
-    yrs = len(rets) / 252
-    tol = 0.01 # 🌟 오차범위 1% (상하 총 2%)
+    target_ret, target_mdd = target_ret_pct / 100.0, target_mdd_pct / 100.0
+    yrs, tol = len(rets) / 252, 0.01
 
-    # 목적함수: 변동성 최소화
     def vol_fn(w): return np.sqrt(np.dot(w.T, np.dot(rets.cov() * 252, w)))
-
-    # 🌟 제약조건 1: 수익률이 (목표 - 1%) ~ (목표 + 1%) 사이에 있어야 함
     def ret_range_cons(w):
         cagr = ((1 + (rets @ w)).cumprod().iloc[-1] ** (1/yrs)) - 1
         return tol - abs(cagr - target_ret)
-
-    # 🌟 제약조건 2: MDD가 (목표 - 1%) ~ (목표 + 1%) 사이에 있어야 함
     def mdd_range_cons(w):
         cum_rets = (1 + (rets @ w)).cumprod()
         mdd = -((cum_rets - cum_rets.cummax()) / cum_rets.cummax()).min()
@@ -61,60 +55,66 @@ def find_precise_optimal(target_ret_pct, target_mdd_pct, data):
     
     res = minimize(vol_fn, [1./len(universe)]*len(universe), 
                    bounds=[(0, 0.4)]*len(universe), constraints=cons, method='SLSQP')
-    
-    if not res.success: return None
-    return {t: round(res.x[i]*100, 1) for i, t in enumerate(universe) if res.x[i] > 0.01}
+    return {t: round(res.x[i]*100, 1) for i, t in enumerate(universe) if res.x[i] > 0.01} if res.success else None
 
 # --- UI 레이아웃 ---
 if st.session_state.page == 'survey':
     st.title("🏛️ 정밀 타겟 퀀트 엔진")
-    st.write("수익률과 MDD를 설정하신 수치의 **±1%(총 2% 오차범위)** 내로 조절하여 최적화합니다.")
     col1, col2 = st.columns(2)
     with col1:
         st.session_state.target_return = st.number_input("목표 수익률 (%)", 1.0, 30.0, float(st.session_state.target_return), 0.1)
     with col2:
         st.session_state.target_mdd = st.number_input("목표 MDD (%)", 1.0, 50.0, float(st.session_state.target_mdd), 0.1)
-    
-    if st.button("오차범위 정밀 분석 및 포트폴리오 생성 🚀", use_container_width=True, type="primary"):
+    if st.button("포트폴리오 생성 🚀", use_container_width=True, type="primary"):
         st.session_state.page = 'dashboard'; st.rerun()
 
 elif st.session_state.page == 'dashboard':
-    st.title("🛡️ 퀀트 포트폴리오 성과 리포트")
+    st.title("🛡️ 퀀트 포트폴리오 리포트")
     st.markdown(f"""
-    <div style="background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #2e7d32;">
-        <b>🎯 타겟 조건 (오차범위 2%)</b> | 목표 수익률: <b>{st.session_state.target_return}%</b> | 목표 MDD: <b>-{st.session_state.target_mdd}%</b>
+    <div style="background-color: #f8fafc; padding: 10px; border-radius: 5px; border-left: 4px solid #1e293b; margin-bottom: 15px;">
+        <span style="font-size: 0.85rem; color: #64748b;">🎯 타겟 (오차범위 2%)</span><br>
+        <b style="font-size: 1.1rem;">연 수익률: {st.session_state.target_return}% | 목표 MDD: -{st.session_state.target_mdd}%</b>
     </div>
     """, unsafe_allow_html=True)
-    st.write("")
+
     if st.button("⬅️ 설정 수정"): st.session_state.page = 'survey'; st.rerun()
 
     data = get_data(universe)
     wts = find_precise_optimal(st.session_state.target_return, st.session_state.target_mdd, data)
     
     if wts:
-        col1, col2 = st.columns([1.3, 2.5])
+        col1, col2 = st.columns([1, 2.5])
         with col1:
-            st.subheader("💡 추천 종목 및 섹터 코멘트")
+            st.subheader("💡 추천 비중")
             sorted_wts = sorted(wts.items(), key=lambda x: x[1], reverse=True)
+            
+            # 🌟 [신규] 콤팩트 HTML 리스트 스타일
             for t, w in sorted_wts:
                 sector, comment = get_etf_details(t)
-                st.markdown(f"**{t}** ({w}%)")
-                st.caption(f"**섹터:** {sector} | **설명:** {comment}")
-                st.write("---")
+                st.markdown(f"""
+                <div style="padding: 6px 10px; background-color: white; border: 1px solid #e2e8f0; border-radius: 4px; margin-bottom: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                        <span style="font-size: 1rem; font-weight: 700; color: #0f172a;">{t}</span>
+                        <span style="font-size: 1rem; font-weight: 700; color: #16a34a;">{w}%</span>
+                    </div>
+                    <div style="font-size: 0.75rem; color: #64748b; line-height: 1.2; margin-top: 2px;">
+                        <b>{sector}</b> · {comment}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        
         with col2:
             norm = (data / data.iloc[0]) * 100
             pv = sum([norm[t] * (w/100) for t, w in wts.items()])
             df_plot = pd.DataFrame({"추천 포트폴리오": pv, "S&P 500 (SPY)": norm['SPY'], "나스닥 100 (QQQ)": norm['QQQ']})
-            st.plotly_chart(px.line(df_plot, title="과거 10년 성과 비교 시뮬레이션"), use_container_width=True)
+            st.plotly_chart(px.line(df_plot, title="과거 10년 성과 비교"), use_container_width=True)
             
-            # 성과 지표 비교표
             res_list = []
             for c in df_plot.columns:
                 yrs = len(df_plot[c])/252
-                cagr = ((df_plot[c].iloc[-1]/df_plot[c].iloc[0])**(1/yrs)-1)*100
-                mdd = ((df_plot[c]-df_plot[c].cummax())/df_plot[c].cummax()).min()*100
+                cagr, mdd = ((df_plot[c].iloc[-1]/df_plot[c].iloc[0])**(1/yrs)-1)*100, ((df_plot[c]-df_plot[c].cummax())/df_plot[c].cummax()).min()*100
                 res_list.append({"자산 구분": c, "CAGR(수익률)": f"{cagr:.2f}%", "MDD(최대낙폭)": f"{mdd:.2f}%"})
-            st.subheader("📊 지수 대비 성과 요약")
+            st.subheader("📊 성과 요약")
             st.table(pd.DataFrame(res_list))
     else:
-        st.error("⚠️ 해당 조건(2% 오차범위 내)을 만족하는 조합을 찾을 수 없습니다. 목표를 현실적으로 조정해주세요.")
+        st.error("⚠️ 해당 조건을 만족하는 조합을 찾을 수 없습니다. 조건을 완화해주세요.")
