@@ -132,13 +132,20 @@ def run():
                 with col_r:
                     norm = (data / data.iloc[0]) * 100
                     pv = sum([norm[t] * (w/100) for t, w in wts.items()])
-                    df_p = pd.DataFrame({"추천": pv, "S&P 500": norm['SPY'], "나스닥 100": norm['QQQ']})
+                    df_p = pd.DataFrame({"추천 포트폴리오": pv, "S&P 500": norm['SPY'], "나스닥 100": norm['QQQ']})
                     st.plotly_chart(px.line(df_p, title="과거 10년 성과 비교 시뮬레이션"), use_container_width=True)
                     
-                    # CAGR 및 MDD 표 부활!
+                    # --- 🌟 개선된 성과 요약 표 ---
+                    st.markdown("### 📊 전략 성과 요약 (10년 기준)")
                     res_list = []
                     for c in df_p.columns:
                         y = len(df_p[c])/252
                         cagr = ((df_p[c].values[-1]/df_p[c].values[0])**(1/y)-1)*100
                         mdd = ((df_p[c]-df_p[c].cummax())/df_p[c].cummax()).min()*100
-                        res_list.append({"구분": c, "CAGR": f"{cagr:.2f}%", "MDD": f"{mdd:.2f}%"})
+                        res_list.append({"구분": c, "연평균 수익률(CAGR)": f"{cagr:.2f}%", "최대 하락률(MDD)": f"{mdd:.2f}%"})
+                    
+                    # 표를 눈에 띄게 렌더링 (인덱스 숨김)
+                    st.dataframe(pd.DataFrame(res_list), use_container_width=True, hide_index=True)
+            else:
+                st.error("⚠️ 조건을 만족하는 레시피를 찾을 수 없습니다. 수익률을 낮추거나 MDD 한도를 늘려보세요.")
+                if st.button("⬅️ 다시 조준하기"): st.session_state.page = 'survey'; st.rerun()
