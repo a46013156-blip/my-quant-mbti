@@ -142,7 +142,3 @@ def run():
                         cagr = ((df_p[c].values[-1]/df_p[c].values[0])**(1/y)-1)*100
                         mdd = ((df_p[c]-df_p[c].cummax())/df_p[c].cummax()).min()*100
                         res_list.append({"구분": c, "CAGR": f"{cagr:.2f}%", "MDD": f"{mdd:.2f}%"})
-                    st.table(pd.DataFrame(res_list))
-            else:
-                st.error("⚠️ 조건을 만족하는 레시피를 찾을 수 없습니다. 수익률을 낮추거나 MDD 한도를 늘려보세요.")
-                if st.button("⬅️ 다시 조준하기"): st.session_state.page = 'survey'; st.rerun()
