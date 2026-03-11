@@ -15,6 +15,7 @@ if 'target_return' not in st.session_state: st.session_state.target_return = 12.
 if 'target_mdd' not in st.session_state: st.session_state.target_mdd = 15.0
 if 'max_assets' not in st.session_state: st.session_state.max_assets = 5
 if 'total_investment' not in st.session_state: st.session_state.total_investment = 10000.0
+if 'max_gold' not in st.session_state: st.session_state.max_gold = 10.0 # 기본 10% 캡
 
 TOLERANCE = 1.0 
 
@@ -23,7 +24,7 @@ ETF_INFO = {
     "지수/대형주": {"SPY": "S&P500 지수", "QQQ": "나스닥100 지수", "DIA": "다우존스 지수", "IWM": "러셀2000 지수"},
     "성장 섹터": {"SMH": "반도체", "XLK": "기술주", "VGT": "IT전체", "XLV": "헬스케어", "XLF": "금융", "XLE": "에너지"},
     "배당/가치": {"SCHD": "배당성장", "VYM": "고배당", "VIG": "배당귀족", "DVY": "우량배당"},
-    "안전자산": {"SHV": "초단기국채", "IEF": "중기국채", "TLT": "장기국채", "GLD": "금 현물", "LQD": "회사채"}
+    "안전자산/원자재": {"SHV": "초단기국채", "IEF": "중기국채", "TLT": "장기국채", "LQD": "회사채", "GLD": "금 현물", "SLV": "은 현물"}
 }
 universe = [t for c in ETF_INFO.values() for t in c.keys()]
 
@@ -37,27 +38,37 @@ def get_data(tickers):
     try:
         data = yf.download(list(set(tickers + ['SPY', 'QQQ'])), period="10y", progress=False)['Close']
         if data.empty: return pd.DataFrame()
-        
-        # 🌟 핵심 방어: 10년치 데이터가 90% 이상 존재하는 튼튼한 종목만 살림
         valid_cols = data.columns[data.notna().sum() > (len(data) * 0.9)]
         if len(valid_cols) == 0: return pd.DataFrame()
-        
-        df = data[valid_cols].ffill().dropna()
-        return df
+        return data[valid_cols].ffill().dropna()
     except:
         return pd.DataFrame()
 
-def find_robust_optimal(target_ret_pct, target_mdd_pct, max_assets, data):
+def find_robust_optimal(target_ret_pct, target_mdd_pct, max_assets, max_gold_pct, data):
     if data.empty or len(data) < 20: return None, False
     
     current_universe = [t for t in universe if t in data.columns]
     rets = data[current_universe].pct_change().dropna()
-    
     if rets.empty or len(rets) < 2: return None, False
     
     target_ret, target_mdd = target_ret_pct / 100.0, target_mdd_pct / 100.0
     yrs = len(rets) / 252
     tol_val = TOLERANCE / 100.0
+    gold_limit = max_gold_pct / 100.0
+
+    # 🌟 종목별로 각기 다른 상한선(Bound) 부여
+    def get_bounds(tickers, is_stage2=False):
+        bnds = []
+        for t in tickers:
+            min_w = 0.05 if is_stage2 else 0.0
+            if t in ['GLD', 'SLV']:
+                max_w = gold_limit # 금/은은 사용자가 정한 상한선 적용!
+            else:
+                max_w = 0.7 if is_stage2 else 0.4
+            
+            if min_w > max_w: min_w = max_w 
+            bnds.append((min_w, max_w))
+        return tuple(bnds)
 
     def mdd_fn(w, r):
         port_rets = r @ w
@@ -68,17 +79,15 @@ def find_robust_optimal(target_ret_pct, target_mdd_pct, max_assets, data):
 
     def ret_cons(w, r):
         port_rets = r @ w
-        # 🌟 IndexError 원천 차단: 데이터가 없으면 제약 조건 탈락
         if len(port_rets) == 0: return -99.0 
         cum_ret_series = (1 + port_rets).cumprod()
         if len(cum_ret_series) == 0: return -99.0
-        
-        # .iloc[-1] 대신 절대 에러가 나지 않는 .values[-1] 적용
         actual_cagr = (cum_ret_series.values[-1] ** (1/yrs)) - 1
         return tol_val - abs(actual_cagr - target_ret)
 
+    bnds1 = get_bounds(current_universe, False)
     res = minimize(mdd_fn, [1./len(current_universe)]*len(current_universe), args=(rets,), 
-                   bounds=[(0, 0.4)]*len(current_universe), 
+                   bounds=bnds1, 
                    constraints=[{'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
                                 {'type': 'ineq', 'fun': ret_cons, 'args': (rets,)}], method='SLSQP')
     
@@ -88,8 +97,9 @@ def find_robust_optimal(target_ret_pct, target_mdd_pct, max_assets, data):
     top_tickers = [current_universe[i] for i in top_idx]
     rets_sub = rets[top_tickers]
     
+    bnds2 = get_bounds(top_tickers, True)
     res_sub = minimize(mdd_fn, [1./len(top_tickers)]*len(top_tickers), args=(rets_sub,),
-                       bounds=[(0.05, 0.7)]*len(top_tickers), 
+                       bounds=bnds2, 
                        constraints=[{'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
                                     {'type': 'ineq', 'fun': ret_cons, 'args': (rets_sub,)}], method='SLSQP')
 
@@ -104,18 +114,18 @@ if st.session_state.page == 'survey':
     st.title("⚖️ 나만의 ETF 황금비율 설계소")
     st.write("10년 이상 검증된 데이터로 당신의 투자 레시피를 완성합니다.")
     
-    # 🧹 강력한 캐시 초기화 버튼 (오류 났을 때 자체 해결용)
-    if st.button("🔄 시스템 초기화 (오류 발생 시 클릭)"):
-        st.cache_data.clear()
-        st.rerun()
-        
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.session_state.target_return = st.number_input("목표 연 수익률 (%)", 1.0, 30.0, float(st.session_state.target_return))
         st.session_state.target_mdd = st.number_input("허용 최대 하락률 (MDD, %)", 1.0, 50.0, float(st.session_state.target_mdd))
     with col2:
         st.session_state.max_assets = st.number_input("최대 구성 종목 수 (개)", 3, 10, int(st.session_state.max_assets))
+        st.session_state.max_gold = st.number_input("금/은 상한선 (%)", 0.0, 100.0, float(st.session_state.max_gold))
+    with col3:
         st.session_state.total_investment = st.number_input("총 투자 금액 (USD $)", 100, 1000000, int(st.session_state.total_investment))
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 시스템 초기화"):
+            st.cache_data.clear(); st.rerun()
     
     if st.button("레시피 생성 🚀", use_container_width=True, type="primary"): 
         st.session_state.page = 'dashboard'; st.rerun()
@@ -124,7 +134,7 @@ elif st.session_state.page == 'dashboard':
     st.title("🛡️ 나만의 AI 포트폴리오 처방전")
     st.markdown(f"""
     <div style="background-color: #f8fafc; padding: 12px; border-radius: 8px; border-left: 5px solid #1e293b; margin-bottom: 20px;">
-        💰 총 투자액: <b>${st.session_state.total_investment:,.0f}</b> | 데이터 범위: <b>최근 10년</b><br>
+        💰 총 투자액: <b>${st.session_state.total_investment:,.0f}</b> | 금/은 제한: <b>최대 {st.session_state.max_gold}%</b><br>
         목표 수익률: <b>{st.session_state.target_return}%</b> | 목표 MDD: <b>-{st.session_state.target_mdd}%</b>
     </div>
     """, unsafe_allow_html=True)
@@ -135,7 +145,7 @@ elif st.session_state.page == 'dashboard':
         st.error("⚠️ 금융 데이터를 불러오는 데 실패했습니다. 뒤로 가서 '시스템 초기화' 버튼을 눌러주세요.")
         if st.button("⬅️ 돌아가기"): st.session_state.page = 'survey'; st.rerun()
     else:
-        wts, is_fallback = find_robust_optimal(st.session_state.target_return, st.session_state.target_mdd, st.session_state.max_assets, data)
+        wts, is_fallback = find_robust_optimal(st.session_state.target_return, st.session_state.target_mdd, st.session_state.max_assets, st.session_state.max_gold, data)
         
         if wts:
             if is_fallback: st.warning("⚠️ 입력하신 종목 수 내에서는 완벽한 조준이 어려워 전체 최적 비중을 제안합니다.")
