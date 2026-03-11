@@ -4,10 +4,6 @@ st.set_page_config(page_title="My Quant Portfolio", layout="wide")
 
 st.title("📊 My Quant Portfolio")
 st.markdown("---")
-st.write("환영합니다! 원하시는 분석 도구를 아래에서 클릭하여 이동해주세요.")
+st.write("환영합니다! 데이터 기반의 퀀트 투자 레시피를 설계하는 공간입니다.")
 
-st.markdown("<br>", unsafe_allow_html=True)
-
-# 🌟 수직으로 배열된 '진짜' 클릭 이동 버튼
-st.page_link("pages/1_ETF_Recipe.py", label="⚖️ [1번 방] ETF 자산배분 모델로 이동하기", icon="1️⃣")
-st.page_link("pages/2_Stock_DeepDive.py", label="📈 [2번 방] 개별종목 딥다이브 분석으로 이동하기", icon="2️⃣")
+st.success("👈 **화면 왼쪽 위 구석에 있는 작은 화살표( > )를 눌러보세요!** \n\n숨겨져 있던 이동 메뉴(사이드바)가 짠 하고 나타납니다. 거기서 1번(ETF)과 2번(종목분석)을 자유롭게 클릭해서 이동하실 수 있습니다.")
