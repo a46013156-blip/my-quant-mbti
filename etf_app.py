@@ -7,16 +7,8 @@ from scipy.optimize import minimize
 import warnings
 
 warnings.filterwarnings('ignore')
-st.set_page_config(page_title="ETF Recipe Builder", layout="wide")
 
-# 세션 및 데이터 로직 (생략 없이 이전 완성본 그대로 유지)
-if 'page' not in st.session_state: st.session_state.page = 'survey'
-if 'target_return' not in st.session_state: st.session_state.target_return = 12.0
-if 'target_mdd' not in st.session_state: st.session_state.target_mdd = 15.0
-if 'max_assets' not in st.session_state: st.session_state.max_assets = 5
-if 'total_investment' not in st.session_state: st.session_state.total_investment = 10000.0
-if 'max_gold' not in st.session_state: st.session_state.max_gold = 10.0 
-
+# --- ETF 공통 데이터 및 함수 ---
 TOLERANCE = 1.0 
 ETF_INFO = {
     "지수/대형주": {"SPY": "S&P500", "QQQ": "나스닥100", "DIA": "다우존스", "IWM": "러셀2000"},
@@ -81,32 +73,41 @@ def find_robust_optimal(target_ret_pct, target_mdd_pct, max_assets, max_gold_pct
     weights = {final_tickers[i]: round(final_res.x[i]*100, 1) for i in range(len(final_tickers)) if final_res.x[i] > 0.01}
     return weights, not res_sub.success
 
-# --- UI ---
-st.title("⚖️ ETF 황금비율 설계소")
-if st.session_state.page == 'survey':
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.session_state.target_return = st.number_input("목표 수익률 (%)", 1.0, 30.0, float(st.session_state.target_return))
-        st.session_state.target_mdd = st.number_input("허용 MDD (%)", 1.0, 50.0, float(st.session_state.target_mdd))
-    with col2:
-        st.session_state.max_assets = st.number_input("최대 종목 수", 3, 10, int(st.session_state.max_assets))
-        st.session_state.max_gold = st.number_input("금/은 합산 한도 (%)", 0.0, 100.0, float(st.session_state.max_gold))
-    with col3:
-        st.session_state.total_investment = st.number_input("투자금 ($)", 100, 1000000, int(st.session_state.total_investment))
-    if st.button("레시피 생성", use_container_width=True, type="primary"): 
-        st.session_state.page = 'dashboard'; st.rerun()
-else:
-    data = get_data(universe)
-    wts, is_fb = find_robust_optimal(st.session_state.target_return, st.session_state.target_mdd, st.session_state.max_assets, st.session_state.max_gold, data)
-    if wts:
-        if st.button("⬅️ 다시 설계하기"): st.session_state.page = 'survey'; st.rerun()
-        col_l, col_r = st.columns([1, 2.5])
-        with col_l:
-            st.subheader("💡 매수 가이드")
-            for t, w in sorted(wts.items(), key=lambda x:x[1], reverse=True):
-                sec, desc = get_etf_details(t)
-                st.write(f"**{t}**: {w}% (${st.session_state.total_investment*w/100:,.0f})")
-        with col_r:
-            norm = (data / data.iloc[0]) * 100
-            pv = sum([norm[t] * (w/100) for t, w in wts.items()])
-            st.plotly_chart(px.line(pd.DataFrame({"추천": pv, "SPY": norm['SPY']}), title="10년 성과"), use_container_width=True)
+# --- ETF 화면 실행 함수 ---
+def run():
+    st.title("⚖️ ETF 황금비율 설계소")
+    
+    if 'page' not in st.session_state: st.session_state.page = 'survey'
+    if 'target_return' not in st.session_state: st.session_state.target_return = 12.0
+    if 'target_mdd' not in st.session_state: st.session_state.target_mdd = 15.0
+    if 'max_assets' not in st.session_state: st.session_state.max_assets = 5
+    if 'total_investment' not in st.session_state: st.session_state.total_investment = 10000.0
+    if 'max_gold' not in st.session_state: st.session_state.max_gold = 10.0 
+
+    if st.session_state.page == 'survey':
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.session_state.target_return = st.number_input("목표 수익률 (%)", 1.0, 30.0, float(st.session_state.target_return))
+            st.session_state.target_mdd = st.number_input("허용 MDD (%)", 1.0, 50.0, float(st.session_state.target_mdd))
+        with col2:
+            st.session_state.max_assets = st.number_input("최대 종목 수", 3, 10, int(st.session_state.max_assets))
+            st.session_state.max_gold = st.number_input("금/은 합산 한도 (%)", 0.0, 100.0, float(st.session_state.max_gold))
+        with col3:
+            st.session_state.total_investment = st.number_input("투자금 ($)", 100, 1000000, int(st.session_state.total_investment))
+        if st.button("레시피 생성", use_container_width=True, type="primary"): 
+            st.session_state.page = 'dashboard'; st.rerun()
+    else:
+        data = get_data(universe)
+        wts, is_fb = find_robust_optimal(st.session_state.target_return, st.session_state.target_mdd, st.session_state.max_assets, st.session_state.max_gold, data)
+        if wts:
+            if st.button("⬅️ 다시 설계하기"): st.session_state.page = 'survey'; st.rerun()
+            col_l, col_r = st.columns([1, 2.5])
+            with col_l:
+                st.subheader("💡 매수 가이드")
+                for t, w in sorted(wts.items(), key=lambda x:x[1], reverse=True):
+                    sec, desc = get_etf_details(t)
+                    st.write(f"**{t}**: {w}% (${st.session_state.total_investment*w/100:,.0f})")
+            with col_r:
+                norm = (data / data.iloc[0]) * 100
+                pv = sum([norm[t] * (w/100) for t, w in wts.items()])
+                st.plotly_chart(px.line(pd.DataFrame({"추천": pv, "SPY": norm['SPY']}), title="10년 성과"), use_container_width=True)

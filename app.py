@@ -1,9 +1,21 @@
 import streamlit as st
 
+# 분리해둔 2개의 파이썬 파일을 도구구함처럼 불러옵니다.
+import etf_app
+import stock_app
+
 st.set_page_config(page_title="My Quant Portfolio", layout="wide")
 
-st.title("📊 My Quant Portfolio")
-st.markdown("---")
-st.write("환영합니다! 데이터 기반의 퀀트 투자 레시피를 설계하는 공간입니다.")
+# 사이드바 메뉴 강제 고정 (오류 원천 차단)
+st.sidebar.title("📊 My Quant Portfolio")
+st.sidebar.markdown("---")
+menu = st.sidebar.radio(
+    "원하시는 분석 도구를 선택하세요:", 
+    ["⚖️ ETF 자산배분 모델", "📈 개별종목 딥다이브"]
+)
 
-st.success("👈 **화면 왼쪽 위 구석에 있는 작은 화살표( > )를 눌러보세요!** \n\n숨겨져 있던 이동 메뉴(사이드바)가 짠 하고 나타납니다. 거기서 1번(ETF)과 2번(종목분석)을 자유롭게 클릭해서 이동하실 수 있습니다.")
+# 메뉴 선택에 따라 각 파일의 run() 함수를 실행합니다.
+if menu == "⚖️ ETF 자산배분 모델":
+    etf_app.run()
+elif menu == "📈 개별종목 딥다이브":
+    stock_app.run()
