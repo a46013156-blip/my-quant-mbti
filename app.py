@@ -115,7 +115,7 @@ def find_robust_optimal(target_ret_pct, target_mdd_pct, max_assets, max_gold_pct
     return weights, is_fallback
 
 if st.session_state.page == 'survey':
-    st.title("⚖️ 나만의 ETF 황금비율 설계소")
+    st.title("⚖️ 나만의 ETF 자산배분")
     st.write("10년 이상 검증된 데이터로 당신의 투자 레시피를 완성합니다.")
     
     col1, col2, col3 = st.columns(3)
