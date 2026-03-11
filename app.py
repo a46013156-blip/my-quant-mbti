@@ -135,7 +135,7 @@ if st.session_state.page == 'survey':
         st.session_state.page = 'dashboard'; st.rerun()
 
 elif st.session_state.page == 'dashboard':
-    st.title("🛡️ 나만의 AI 포트폴리오 처방전")
+    st.title("🛡️ 나만의 AI 포트폴리오")
     st.markdown(f"""
     <div style="background-color: #f8fafc; padding: 12px; border-radius: 8px; border-left: 5px solid #1e293b; margin-bottom: 20px;">
         💰 총 투자액: <b>${st.session_state.total_investment:,.0f}</b> | 금/은 합산 제한: <b>최대 {st.session_state.max_gold}%</b><br>
