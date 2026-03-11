@@ -10,30 +10,39 @@ def run():
     
     col1, col2 = st.columns([3, 1])
     with col1:
-        # 기본값을 AAPL(애플)로 세팅해 둡니다.
-        ticker = st.text_input("🔍 분석할 종목의 티커를 입력하세요 (예: AAPL, TSLA, MSFT)", "AAPL").upper()
+        ticker = st.text_input("🔍 분석할 종목의 티커를 입력하세요 (예: AAPL, TSLA, NVDA)", "NVDA").upper()
     
     if ticker:
         try:
             with st.spinner(f"'{ticker}' 데이터를 불러오는 중입니다..."):
                 stock = yf.Ticker(ticker)
-                info = stock.info
+                # 1년치 주가 데이터 가져오기
                 hist = stock.history(period="1y")
             
             if hist.empty:
-                st.error("데이터를 불러올 수 없습니다. 티커를 확인해주세요.")
+                st.warning("⚠️ 주가 데이터를 불러올 수 없습니다. 티커명(예: NVDA)이 정확한지 확인해주세요.")
                 return
+            
+            # --- 🛡️ 야후 파이낸스 접속 차단 방어 로직 ---
+            try:
+                info = stock.info
+            except:
+                info = {} # 접속이 막히면 빈 데이터로 처리 (앱이 다운되는 것 방지)
             
             # 🌟 1. 상단 핵심 요약 지표 (Metrics)
             st.subheader(f"{info.get('longName', ticker)} ({ticker})")
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("현재가", f"${info.get('currentPrice', hist['Close'].iloc[-1]):.2f}")
-            c2.metric("52주 최고가", f"${info.get('fiftyTwoWeekHigh', 'N/A')}")
             
-            # 시가총액을 보기 쉽게 Billion(10억) 단위로 변환
+            # 가격은 차트 데이터(hist)에서 무조건 가져오도록 안전장치
+            current_price = hist['Close'].iloc[-1]
+            c1.metric("현재가", f"${current_price:.2f}")
+            
+            high_52w = info.get('fiftyTwoWeekHigh', hist['High'].max())
+            c2.metric("52주 최고가", f"${high_52w:.2f}" if isinstance(high_52w, (int, float)) else "N/A")
+            
             mcap = info.get('marketCap', 0)
-            c3.metric("시가총액", f"${mcap / 1000000000:.2f}B" if mcap else "N/A")
-            c4.metric("PER (주가수익비율)", f"{info.get('trailingPE', 'N/A')}")
+            c3.metric("시가총액", f"${mcap / 1000000000:.2f}B" if mcap else "데이터 없음")
+            c4.metric("PER", f"{info.get('trailingPE', '데이터 없음')}")
             
             st.markdown("<br>", unsafe_allow_html=True)
             
@@ -61,4 +70,6 @@ def run():
             st.plotly_chart(fig, use_container_width=True)
             
         except Exception as e:
-            st.error(f"오류가 발생했습니다: 입력하신 티커가 정확한지 확인해주세요.")
+            # 에러가 나면 무슨 에러인지 화면에 적나라하게 띄워줍니다!
+            st.error(f"🚨 시스템 오류 상세 내용: {e}")
+            st.info("만약 'No module named plotly' 라는 문구가 보인다면 알려주세요!")
